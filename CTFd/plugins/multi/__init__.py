@@ -91,17 +91,9 @@ def chal(chalid):
             # return '3' # Submitting too fast
             return jsonify({'status': 3, 'message': "You're submitting keys too fast. Slow down."})
 
-        solves = Awards.query.filter_by(teamid=session['id'], name=chalid).first()
+        solves = Awards.query.filter_by(teamid=session['id'], name=chalid, description=request.form['key'].strip()).first()
 
         # Challenge not solved yet
-        chal_keys = Keys.query.filter_by(chal=chalid).all()
-        static_answer_total = 0
-        wrong_answer_total = 0
-        for chal_key in chal_keys:
-            if chal_key.key_type == 0:
-                static_answer_total += 1
-            if chal_key.key_type == 2:
-                wrong_answer_total += 1
         try:
             flag_value = solves.description
         except AttributeError:
