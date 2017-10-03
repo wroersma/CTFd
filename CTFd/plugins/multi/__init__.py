@@ -3,11 +3,12 @@ from CTFd.plugins import challenges
 from CTFd.plugins import keys
 from CTFd.plugins.keys import BaseKey
 from flask import request, redirect, jsonify, url_for, session, abort
-from CTFd.models import db, Challenges, Solves, WrongKeys, Keys, Teams, Awards
+from CTFd.models import db, Challenges, WrongKeys, Keys, Teams, Awards, Solves
 from CTFd import utils
 import logging
 import time
 from CTFd.plugins.challenges import get_chal_class
+from flask import render_template
 
 
 class MultiChallenge(challenges.BaseChallenge):
@@ -31,7 +32,8 @@ class MultiChallenge(challenges.BaseChallenge):
     def solve(team, chal, request):
         """Solve the question and put results in the Awards DB"""
         provided_key = request.form['key'].strip()
-        solve = Awards(teamid=team.id, name=chal.id, value=chal.value, description=provided_key)
+        solve = Awards(teamid=team.id, name=chal.id, value=chal.value)
+        solve.description = provided_key
         db.session.add(solve)
         db.session.commit()
         db.session.close()
@@ -51,7 +53,8 @@ class MultiChallenge(challenges.BaseChallenge):
         wrong_value = 0
         wrong_value -= chal.value
         wrong = WrongKeys(teamid=team.id, chalid=chal.id, ip=utils.get_ip(request), flag=provided_key)
-        solve = Awards(teamid=team.id, name=chal.id, value=wrong_value, description=provided_key)
+        solve = Awards(teamid=team.id, name=chal.id, value=wrong_value)
+        solve.description = provided_key
         db.session.add(wrong)
         db.session.add(solve)
         db.session.commit()
@@ -158,7 +161,47 @@ def chal(chalid):
         })
 
 
+def team(teamid):
+    if utils.get_config('view_scoreboard_if_utils.authed') and not utils.authed():
+        return redirect(url_for('auth.login', next=request.path))
+    errors = []
+    freeze = utils.get_config('freeze')
+    user = Teams.query.filter_by(id=teamid).first_or_404()
+    solves = Solves.query.filter_by(teamid=teamid)
+    awards = Awards.query.filter_by(teamid=teamid)
+
+    place = user.place()
+    score = user.score()
+
+    if freeze:
+        freeze = utils.unix_time_to_utc(freeze)
+        if teamid != session.get('id'):
+            solves = solves.filter(Solves.date < freeze)
+            awards = awards.filter(Awards.date < freeze)
+
+    solves = solves.all()
+    awards = awards.all()
+
+    db.session.close()
+
+    if utils.hide_scores() and teamid != session.get('id'):
+        errors.append('Scores are currently hidden')
+
+    if errors:
+        return render_template('multiteam.html', team=user, errors=errors)
+
+    if request.method == 'GET':
+        return render_template('multiteam.html', solves=solves, awards=awards, team=user, score=score, place=place, score_frozen=utils.is_scoreboard_frozen())
+    elif request.method == 'POST':
+        json = {'solves': []}
+        for x in solves:
+            json['solves'].append({'id': x.id, 'chal': x.chalid, 'team': x.teamid})
+        return jsonify(json)
+
+
 def load(app):
+    """load overrides for multi-answer plugin to work properly"""
     challenges.CHALLENGE_CLASSES[2] = MultiChallenge
     keys.KEY_CLASSES[2] = CTFdWrongKey
     app.view_functions['challenges.chal'] = chal
+    app.view_functions['views.team'] = team
