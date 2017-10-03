@@ -8,7 +8,6 @@ from CTFd import utils
 import logging
 import time
 from CTFd.plugins.challenges import get_chal_class
-import datetime
 
 
 class MultiChallenge(challenges.BaseChallenge):
@@ -43,6 +42,16 @@ class MultiChallenge(challenges.BaseChallenge):
         db.session.commit()
         db.session.close()
 
+    def wrong(team, chal, request):
+        provided_key = request.form['key'].strip()
+        wrong_value = 0
+        wrong_value -= chal.value
+        wrong = WrongKeys(teamid=team.id, chalid=chal.id, ip=utils.get_ip(request), flag=provided_key)
+        solve = Awards(teamid=team.id, name=chal.id, value=wrong_value, description=provided_key)
+        db.session.add(wrong)
+        db.session.add(solve)
+        db.session.commit()
+        db.session.close()
 
 class CTFdWrongKey(BaseKey):
     """Wrong key to deduct points from the player"""
@@ -119,7 +128,7 @@ def chal(chalid):
                 return jsonify({'status': 1, 'message': message})
             elif message == "Failed Attempt":
                 if utils.ctftime() or utils.is_admin():
-                    chal_class.fail(team=team, chal=chal, request=request)
+                    chal_class.wrong(team=team, chal=chal, request=request)
                 logger.info("[{0}] {1} submitted {2} with kpm {3} [Failed Attempt]".format(*data))
                 return jsonify({'status': 1, 'message': message})
             else:  # The challenge plugin says the input is wrong
