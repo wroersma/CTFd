@@ -16,6 +16,7 @@ class MultiChallenge(challenges.BaseChallenge):
     name = "multi-challenge"
 
     def attempt(chal, request):
+        """Attempt the user answer to see if it's right"""
         provided_key = request.form['key'].strip()
         chal_keys = Keys.query.filter_by(chal=chal.id).all()
         for chal_key in chal_keys:
@@ -28,6 +29,7 @@ class MultiChallenge(challenges.BaseChallenge):
 
     @staticmethod
     def solve(team, chal, request):
+        """Solve the question and put results in the Awards DB"""
         provided_key = request.form['key'].strip()
         solve = Awards(teamid=team.id, name=chal.id, value=chal.value, description=provided_key)
         db.session.add(solve)
@@ -36,6 +38,7 @@ class MultiChallenge(challenges.BaseChallenge):
 
     @staticmethod
     def fail(team, chal, request):
+        """Standard fail if the question is wrong record it"""
         provided_key = request.form['key'].strip()
         wrong = WrongKeys(teamid=team.id, chalid=chal.id, ip=utils.get_ip(request), flag=provided_key)
         db.session.add(wrong)
@@ -43,6 +46,7 @@ class MultiChallenge(challenges.BaseChallenge):
         db.session.close()
 
     def wrong(team, chal, request):
+        """Fail if the question is wrong record it and record the wrong answer to deduct points"""
         provided_key = request.form['key'].strip()
         wrong_value = 0
         wrong_value -= chal.value
@@ -53,6 +57,7 @@ class MultiChallenge(challenges.BaseChallenge):
         db.session.commit()
         db.session.close()
 
+
 class CTFdWrongKey(BaseKey):
     """Wrong key to deduct points from the player"""
     id = 2
@@ -60,6 +65,7 @@ class CTFdWrongKey(BaseKey):
 
     @staticmethod
     def compare(saved, provided):
+        """Compare the saved and provided keys"""
         if len(saved) != len(provided):
             return False
         result = 0
@@ -69,6 +75,7 @@ class CTFdWrongKey(BaseKey):
 
 
 def chal(chalid):
+    """Custom chal function to override challenges.chal when multi-answer is used"""
     if utils.ctf_ended() and not utils.view_after_ctf():
         abort(403)
     if not utils.user_can_view_challenges():
@@ -151,64 +158,7 @@ def chal(chalid):
         })
 
 
-def solves(teamid=None):
-    solves = None
-    awards = None
-    if teamid is None:
-        if utils.is_admin():
-            solves = Solves.query.filter_by(teamid=session['id']).all()
-        elif utils.user_can_view_challenges():
-            if utils.authed():
-                solves = Solves.query.join(Teams, Solves.teamid == Teams.id).filter(Solves.teamid == session['id'], Teams.banned == False).all()
-            else:
-                return jsonify({'solves': []})
-        else:
-            return redirect(url_for('auth.login', next='solves'))
-    else:
-        if utils.hide_scores():
-            # Use empty values to hide scores
-            solves = []
-            awards = []
-        else:
-            solves = Solves.query.filter_by(teamid=teamid)
-            awards = Awards.query.filter_by(teamid=teamid)
-
-            freeze = utils.get_config('freeze')
-            if freeze:
-                freeze = utils.unix_time_to_utc(freeze)
-                if teamid != session.get('id'):
-                    solves = solves.filter(Solves.date < freeze)
-                    awards = awards.filter(Awards.date < freeze)
-
-            solves = solves.all()
-            awards = awards.all()
-    db.session.close()
-    json = {'solves': []}
-    for solve in solves:
-        json['solves'].append({
-            'chal': solve.chal.name,
-            'chalid': solve.chalid,
-            'team': solve.teamid,
-            'value': solve.chal.value,
-            'category': solve.chal.category,
-            'time': utils.unix_time(solve.date)
-        })
-    if awards:
-        for award in awards:
-            json['solves'].append({
-                'chal': award.name,
-                'chalid': None,
-                'team': award.teamid,
-                'value': award.value,
-                'category': award.category or "Award",
-                'time': utils.unix_time(award.date)
-            })
-    json['solves'].sort(key=lambda k: k['time'])
-    return jsonify(json)
-
-
 def load(app):
     challenges.CHALLENGE_CLASSES[2] = MultiChallenge
     keys.KEY_CLASSES[2] = CTFdWrongKey
     app.view_functions['challenges.chal'] = chal
-    #app.view_functions['models.Multi_Awards'] = Awards
